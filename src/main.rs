@@ -1,3 +1,6 @@
+#![deny(clippy::all)]
+#![warn(clippy::pedantic)]
+
 use owo_colors::OwoColorize;
 
 use std::{
@@ -19,12 +22,13 @@ struct EmpdArgs {
 const CHECK_MARK: &str = "✔️";
 const X: &str = "🗙";
 
+#[allow(clippy::too_many_lines)]
 fn main() {
     let EmpdArgs { path } = EmpdArgs::parse();
 
     let path_path = path::Path::new(&path);
 
-    let result = fs::symlink_metadata(&path_path);
+    let result = fs::symlink_metadata(path_path);
 
     match result {
         Err(er) => match &er.kind() {
@@ -45,7 +49,7 @@ fn main() {
         Ok(me) => {
             let path_buf = fs::canonicalize(path_path).expect("Could not canonicalize path");
 
-            let path_buf_str = (&path_buf)
+            let path_buf_str = path_buf
                 .to_str()
                 .expect("Could not convert path to a UTF-8 string");
 
@@ -154,10 +158,7 @@ fn main() {
                     std::process::exit(5);
                 }
                 _ => {
-                    panic!(
-                        "Path \"{}\" is not a directory, file, or symlink",
-                        path_buf_str
-                    )
+                    panic!("Path \"{path_buf_str}\" is not a directory, file, or symlink")
                 }
             }
         }
