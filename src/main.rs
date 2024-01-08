@@ -5,7 +5,8 @@ use owo_colors::OwoColorize;
 
 use std::{
     fs::{self},
-    io, path,
+    io::{self, ErrorKind},
+    path::{self, Path},
 };
 
 use clap::Parser;
@@ -14,6 +15,9 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct EmpdArgs {
+    /// Delete the file or directory if it is empty
+    #[arg(short, long)]
+    delete_if_empty: bool,
     /// Path to test
     #[arg(index = 1)]
     path: String,
@@ -24,43 +28,41 @@ const X: &str = "🗙";
 
 #[allow(clippy::too_many_lines)]
 fn main() {
-    let EmpdArgs { path } = EmpdArgs::parse();
+    let EmpdArgs {
+        delete_if_empty,
+        path,
+    } = EmpdArgs::parse();
 
     let path_path = path::Path::new(&path);
 
+    let path_path_str = path_path
+        .to_str()
+        .expect("Could not convert path to a UTF-8 string");
+
     let result = fs::symlink_metadata(path_path);
 
-    match result {
-        Err(er) => match &er.kind() {
-            io::ErrorKind::NotFound => {
-                println!("Path \"{}\" does not exist", path.bold());
+    let exit_code = match result {
+        Err(er) => match er.kind() {
+            ErrorKind::NotFound => {
+                eprintln!("Path \"{}\" does not exist", path_path_str.bold());
 
-                std::process::exit(1);
+                11
             }
-            io::ErrorKind::PermissionDenied => {
-                println!("Permission to path \"{}\" was denied", path.bold());
+            ErrorKind::PermissionDenied => {
+                eprintln!("Permission to path \"{}\" was denied", path_path_str.bold());
 
-                std::process::exit(2);
+                12
             }
             _ => {
-                panic!("{}", er);
+                panic!("{er}");
             }
         },
         Ok(me) => {
-            let path_buf = fs::canonicalize(path_path).expect("Could not canonicalize path");
-
-            let path_buf_str = path_buf
-                .to_str()
-                .expect("Could not convert path to a UTF-8 string");
-
-            println!(
-                "Canonicalized input path \"{}\" to \"{}\"",
-                path.bold(),
-                path_buf_str.bold()
-            );
-
             match me {
                 me if me.is_dir() => {
+                    let canonicalize_result = canonicalize(path_path_str, path_path)
+                        .expect("Could not canonicalize directory path");
+
                     let read_dir = path_path.read_dir().expect("Could not read directory");
 
                     let mut directories = 0;
@@ -85,7 +87,9 @@ fn main() {
                                 symlinks += 1;
                             }
                             _ => {
-                                panic!("Encountered directory entry that is not a directory, file, or symlink")
+                                panic!(
+                                    "Encountered directory entry that is not a directory, file, or symlink"
+                                );
                             }
                         }
                     }
@@ -96,7 +100,7 @@ fn main() {
                         println!(
                             " {}  Path \"{}\" is a {} (directories: {}, files: {}, symlinks: {}, total items: {})",
                             X.bold().red(),
-                            path_buf_str.bold(),
+                            canonicalize_result.bold(),
                             "non-empty directory".bold().red(),
                             bold_if_greater_than_zero(directories),
                             bold_if_greater_than_zero(files),
@@ -104,40 +108,100 @@ fn main() {
                             bold_if_greater_than_zero(total_items)
                         );
 
-                        std::process::exit(3);
+                        31
                     } else {
                         println!(
                             " {}  Path \"{}\" is an {}",
                             CHECK_MARK.bold().green(),
-                            path_buf_str.bold(),
+                            canonicalize_result.bold(),
                             "empty directory".bold().green()
                         );
 
-                        std::process::exit(0);
+                        if delete_if_empty {
+                            eprintln!(
+                                "Are you sure you want to delete empty directory \"{}\"? (\"y\")\n\
+                                (Note that no file locking or revalidation is performed, and the directory may be non-empty by the time you respond to this prompt!)",
+                                canonicalize_result.bold()
+                            );
+
+                            let input = &mut String::new();
+
+                            io::stdin()
+                                .read_line(input)
+                                .expect("\"read_line\" call failed");
+
+                            if input == "y\n" {
+                                // TODO Status of path could have changed by now
+                                fs::remove_dir(path_path).unwrap();
+
+                                println!(
+                                    "Deleted empty directory \"{}\"",
+                                    canonicalize_result.bold()
+                                );
+
+                                0
+                            } else {
+                                println!("Input was not \"y\", not deleting empty directory");
+
+                                32
+                            }
+                        } else {
+                            0
+                        }
                     }
                 }
                 me if me.is_file() => {
+                    let canonicalize_result = canonicalize(path_path_str, path_path)
+                        .expect("Could not canonicalize file path");
+
                     let len = me.len();
 
                     if len > 0 {
                         println!(
                             " {}  Path \"{}\" is a {} (bytes: {})",
                             X.bold().red(),
-                            path_buf_str.bold(),
+                            canonicalize_result.bold(),
                             "non-empty file".bold().red(),
                             len.bold()
                         );
 
-                        std::process::exit(4);
+                        21
                     } else {
                         println!(
                             " {}  Path \"{}\" is an {}",
                             CHECK_MARK.bold().green(),
-                            path_buf_str.bold(),
+                            canonicalize_result.bold(),
                             "empty file".bold().green()
                         );
 
-                        std::process::exit(0);
+                        if delete_if_empty {
+                            eprintln!(
+                                "Are you sure you want to delete empty file \"{}\"? (\"y\")\n\
+                                (Note that no file locking or revalidation is performed, and the file may be non-empty by the time you respond to this prompt!)",
+                                canonicalize_result.bold()
+                            );
+
+                            let input = &mut String::new();
+
+                            io::stdin()
+                                .read_line(input)
+                                .expect("\"read_line\" call failed");
+
+                            if input == "y\n" {
+                                // TODO Status of path could have changed by now
+                                fs::remove_file(path_path).unwrap();
+
+                                println!("Deleted empty file \"{}\"", canonicalize_result.bold());
+
+                                0
+                            } else {
+                                println!("Input was not \"y\", not deleting empty file");
+
+                                22
+                            }
+                        } else {
+                            0
+                        }
                     }
                 }
                 me if me.is_symlink() => {
@@ -148,21 +212,77 @@ fn main() {
                         .to_str()
                         .expect("Could not convert symbolic link path to a UTF-8 string");
 
-                    println!(
-                        " {}  Path \"{}\" is a symbolic link to \"{}\"",
-                        X.bold().red(),
-                        path_buf_str.bold(),
-                        link_path_buf_str
-                    );
+                    let canonicalize_result = canonicalize(path_path_str, path_path);
 
-                    std::process::exit(5);
+                    #[allow(clippy::single_match_else)]
+                    {
+                        match canonicalize_result {
+                            Some(st) => {
+                                println!(
+                                    " {}  Path \"{}\" (non-canonicalized) is a symbolic link to \"{}\" (resolves to \"{st}\")",
+                                    X.bold().red(),
+                                    path_path_str.bold(),
+                                    link_path_buf_str.bold()
+                                );
+
+                                41
+                            }
+                            None => {
+                                println!(
+                                    " {}  Path \"{}\" (non-canonicalized) is a symbolic link to non-existent file \"{}\" (non-canonicalized)",
+                                    CHECK_MARK.bold().green(),
+                                    path_path_str.bold(),
+                                    link_path_buf_str.bold()
+                                );
+
+                                if delete_if_empty {
+                                    eprintln!(
+                                        "Are you sure you want to delete symbolic link \"{}\" (non-canonicalized) pointing to non-existent file \"{}\"? (non-canonicalized) (\"y\")\n\
+                                        (Note that no file locking or revalidation is performed, and the symbolic link destination may exist by the time you respond to this prompt!)",
+                                        path_path_str.bold(),
+                                        link_path_buf_str.bold()
+                                    );
+
+                                    let input = &mut String::new();
+
+                                    io::stdin()
+                                        .read_line(input)
+                                        .expect("\"read_line\" call failed");
+
+                                    if input == "y\n" {
+                                        // TODO Status of path could have changed by now
+                                        fs::remove_file(path_path).unwrap();
+
+                                        println!(
+                                            "Deleted symbolic link \"{}\" (non-canonicalized)",
+                                            path_path_str.bold()
+                                        );
+
+                                        0
+                                    } else {
+                                        println!("Input was not \"y\", not deleting symbolic link");
+
+                                        42
+                                    }
+                                } else {
+                                    0
+                                }
+                            }
+                        }
+                    }
                 }
                 _ => {
-                    panic!("Path \"{path_buf_str}\" is not a directory, file, or symlink")
+                    panic!("Path \"{path_path_str}\" is not a directory, file, or symlink")
                 }
             }
         }
+    };
+
+    if exit_code != 0 {
+        eprintln!("Exiting with non-zero exit code {}", exit_code.bold());
     }
+
+    std::process::exit(exit_code);
 }
 
 fn bold_if_greater_than_zero(input: i32) -> String {
@@ -171,4 +291,39 @@ fn bold_if_greater_than_zero(input: i32) -> String {
     } else {
         input.to_string()
     }
+}
+
+fn canonicalize(path_str: &str, path_path: &Path) -> Option<String> {
+    let canonicalize_result = fs::canonicalize(path_path);
+
+    let option: Option<String> = match canonicalize_result {
+        Ok(pa) => {
+            let path_buf_str = pa
+                .to_str()
+                .expect("Could not convert path to a UTF-8 string");
+
+            eprintln!(
+                "Canonicalized input path \"{}\" to \"{}\"",
+                path_str.bold(),
+                path_buf_str.bold()
+            );
+
+            Some(path_buf_str.to_owned())
+        }
+        Err(er) => match er.kind() {
+            ErrorKind::NotFound => {
+                eprintln!(
+                        "Could not canonicalize input path \"{}\" because it or the file it resolves to does not exist",
+                        path_str.bold()
+                    );
+
+                None
+            }
+            _ => {
+                panic!("{er}");
+            }
+        },
+    };
+
+    option
 }
