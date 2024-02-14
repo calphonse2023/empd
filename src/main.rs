@@ -13,7 +13,7 @@ use clap::Parser;
 
 /// Checks if a directory (or file) is empty. Only supports UTF-8 paths.
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about)]
 struct EmpdArgs {
     /// Delete the file or directory if it is empty
     #[arg(short, long)]
