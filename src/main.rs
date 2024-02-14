@@ -11,7 +11,7 @@ use std::{
 
 use clap::Parser;
 
-/// Checks if a directory (or file) is empty. Only supports UTF-8 paths.
+/// Checks if a directory or file is empty, or if a symbolic link points to a path that does not exist. Only supports UTF-8 paths.
 #[derive(Parser)]
 #[command(author, version, about)]
 struct EmpdArgs {

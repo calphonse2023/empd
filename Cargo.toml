@@ -11,6 +11,7 @@ owo-colors = "=4.0.0"
 
 [package]
 edition = "2021"
+license = "MIT"
 name = "empd"
 version = "0.1.0"
 
